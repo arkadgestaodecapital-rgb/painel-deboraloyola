@@ -280,50 +280,43 @@
 </div>
 
 <script>
-// ── CONFIG GITHUB ─────────────────────────────────────────────────────────
-const GH_TOKEN = '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';
-const GH_REPO = 'arkadgestaodecapital-rgb/painel-deboraloyola';
-const GH_FILE = 'dados.json';
-const GH_API = `https://api.github.com/repos/${GH_REPO}/contents/${GH_FILE}`;
+// ── CONFIG SUPABASE ───────────────────────────────────────────────────────
+const SB_URL = 'https://kvttsamhfyuuzmlyqekb.supabase.co';
+const SB_KEY = 'sb_publishable_DVinuV203BqlwFDeamQAIw_cef_6RaR';
+const SB_TABLE = 'painel_dados';
+const SB_ROW_ID = 1;
+const SB_HEADERS = { 'Content-Type': 'application/json', 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY, 'Prefer': 'resolution=merge-duplicates' };
 
-let ghFileSha = null;
 let saveTimeout = null;
 
 // ── STATE ──────────────────────────────────────────────────────────────────
 let state = { dividas:[], fixas:[], variaveis:[], renda:[], recorrentes:[], historico:[] };
 
 function showSyncStatus(msg, color='var(--muted)') {
-  let el = document.getElementById('sync-status');
+  const el = document.getElementById('sync-status');
   if (!el) return;
   el.textContent = msg;
   el.style.color = color;
 }
 
 async function loadState() {
-  showSyncStatus('⏳ Carregando dados...', 'var(--accent3)');
+  showSyncStatus('⏳ Carregando...', 'var(--accent3)');
   try {
-    const res = await fetch(GH_API, {
-      headers: { 'Authorization': `token ${GH_TOKEN}`, 'Accept': 'application/vnd.github.v3+json' }
+    const res = await fetch(`${SB_URL}/rest/v1/${SB_TABLE}?id=eq.${SB_ROW_ID}&select=dados`, {
+      headers: SB_HEADERS
     });
     if (res.ok) {
-      const data = await res.json();
-      ghFileSha = data.sha;
-      const decoded = JSON.parse(atob(data.content.replace(/\n/g,'')));
-      state = { dividas:[], fixas:[], variaveis:[], renda:[], recorrentes:[], historico:[], ...decoded };
-      ['dividas','fixas','variaveis','renda','recorrentes','historico'].forEach(k=>{ if(!Array.isArray(state[k])) state[k]=[]; });
+      const rows = await res.json();
+      if (rows.length > 0 && rows[0].dados) {
+        const parsed = typeof rows[0].dados === 'string' ? JSON.parse(rows[0].dados) : rows[0].dados;
+        state = { dividas:[], fixas:[], variaveis:[], renda:[], recorrentes:[], historico:[], ...parsed };
+        ['dividas','fixas','variaveis','renda','recorrentes','historico'].forEach(k=>{ if(!Array.isArray(state[k])) state[k]=[]; });
+      }
       showSyncStatus('✓ Sincronizado', 'var(--ok)');
-    } else if (res.status === 404) {
-      // Arquivo não existe ainda, tenta localStorage como fallback
-      try {
-        const s = localStorage.getItem('dominio-financeiro-v2');
-        if (s) { const p=JSON.parse(s); state={...state,...p}; }
-      } catch(e){}
-      showSyncStatus('✓ Pronto', 'var(--ok)');
     } else {
       throw new Error('HTTP ' + res.status);
     }
   } catch(e) {
-    // Fallback para localStorage
     try {
       const s = localStorage.getItem('dominio-financeiro-v2');
       if (s) { const p=JSON.parse(s); state={...state,...p}; ['dividas','fixas','variaveis','renda','recorrentes','historico'].forEach(k=>{ if(!Array.isArray(state[k])) state[k]=[]; }); }
@@ -332,20 +325,15 @@ async function loadState() {
   }
 }
 
-async function saveToGitHub() {
+async function saveToSupabase() {
   showSyncStatus('💾 Salvando...', 'var(--accent)');
   try {
-    const content = btoa(unescape(encodeURIComponent(JSON.stringify(state))));
-    const body = { message: 'Atualização painel', content, committer: { name: 'Painel', email: 'painel@local' } };
-    if (ghFileSha) body.sha = ghFileSha;
-    const res = await fetch(GH_API, {
-      method: 'PUT',
-      headers: { 'Authorization': `token ${GH_TOKEN}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
+    const res = await fetch(`${SB_URL}/rest/v1/${SB_TABLE}`, {
+      method: 'POST',
+      headers: SB_HEADERS,
+      body: JSON.stringify({ id: SB_ROW_ID, dados: JSON.stringify(state) })
     });
-    if (res.ok) {
-      const data = await res.json();
-      ghFileSha = data.content.sha;
+    if (res.ok || res.status === 201 || res.status === 204) {
       localStorage.setItem('dominio-financeiro-v2', JSON.stringify(state));
       showSyncStatus('✓ Salvo na nuvem', 'var(--ok)');
     } else {
@@ -360,7 +348,7 @@ async function saveToGitHub() {
 function saveState() {
   localStorage.setItem('dominio-financeiro-v2', JSON.stringify(state));
   clearTimeout(saveTimeout);
-  saveTimeout = setTimeout(saveToGitHub, 1500);
+  saveTimeout = setTimeout(saveToSupabase, 1500);
 }
 
 // ── UTILS ──────────────────────────────────────────────────────────────────
